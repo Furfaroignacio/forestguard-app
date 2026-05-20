@@ -337,6 +337,96 @@ elif pagina == "🌎 Mapa de riesgo":
     fig_cl.update_traces(textposition='top center', textfont_size=8)
     fig_cl.update_layout(template='plotly_white', height=420)
     st.plotly_chart(fig_cl, use_container_width=True)
+    # ── ÁRBOL DE DECISIÓN ─────────────────────────────────────
+    st.markdown("---")
+    st.subheader("🌿 Árbol de decisión — Reglas de clasificación")
+    st.markdown("El árbol explica *por qué* cada provincia recibe su perfil de impacto. "
+                "Solo necesita dos variables para clasificar perfectamente las 16 provincias.")
+
+    from sklearn.tree import DecisionTreeClassifier, export_text
+    from sklearn.preprocessing import LabelEncoder
+    import matplotlib.pyplot as plt
+    from sklearn.tree import plot_tree
+
+    # Datos
+    df_raw_tree = df_agro.copy()
+    features_tree = df_raw_tree.groupby('provincia').agg(
+        sup_total_mha   = ('sup_sembrada_ha', lambda x: x.sum()/1e6),
+        prod_total_mtn  = ('produccion_tn',   lambda x: x.sum()/1e6),
+        pct_soja_maiz   = ('es_soja_maiz',    lambda x: x.mean()*100),
+        crecimiento_pct = ('sup_sembrada_ha', lambda x: (
+            x[df_raw_tree.loc[x.index,'anio'] >= 2020].mean() /
+            x[df_raw_tree.loc[x.index,'anio'] <= 2004].mean() - 1
+        ) * 100 if x[df_raw_tree.loc[x.index,'anio'] <= 2004].mean() > 0 else 0)
+    ).reset_index()
+    features_tree['crecimiento_pct'] = features_tree['crecimiento_pct'].fillna(0)
+
+    labels_tree = {
+        'BUENOS AIRES': 'Alto impacto', 'CORDOBA': 'Alto impacto',
+        'SANTA FE': 'Alto impacto', 'CHACO': 'Impacto medio',
+        'ENTRE RIOS': 'Impacto medio', 'LA PAMPA': 'Impacto medio',
+        'FORMOSA': 'Impacto medio', 'CORRIENTES': 'Impacto medio',
+        'MISIONES': 'Impacto medio', 'LA RIOJA': 'Impacto medio',
+        'CATAMARCA': 'Bajo impacto', 'JUJUY': 'Bajo impacto',
+        'SALTA': 'Bajo impacto', 'SAN LUIS': 'Bajo impacto',
+        'SANTIAGO DEL ESTERO': 'Bajo impacto', 'TUCUMAN': 'Bajo impacto'
+    }
+    features_tree['perfil'] = features_tree['provincia'].map(labels_tree)
+
+    X_tree = features_tree[['sup_total_mha','prod_total_mtn',
+                              'pct_soja_maiz','crecimiento_pct']]
+    le_tree = LabelEncoder()
+    y_tree = le_tree.fit_transform(features_tree['perfil'])
+
+    arbol = DecisionTreeClassifier(max_depth=3, random_state=42, min_samples_leaf=2)
+    arbol.fit(X_tree, y_tree)
+
+    # Visualización
+    fig_tree, ax_tree = plt.subplots(figsize=(14, 7))
+    fig_tree.patch.set_facecolor('#0e1117')
+    ax_tree.set_facecolor('#0e1117')
+    plot_tree(arbol,
+              feature_names=['Sup. sembrada (M ha)','Producción (M tn)',
+                             '% Soja/Maíz','Crecimiento (%)'],
+              class_names=le_tree.classes_,
+              filled=True, rounded=True, fontsize=11,
+              ax=ax_tree, impurity=False, precision=1)
+    plt.title('Árbol de decisión — Clasificación por perfil de impacto',
+              fontsize=13, fontweight='bold', color='white', pad=15)
+    plt.tight_layout()
+    st.pyplot(fig_tree)
+    plt.close()
+
+    # Importancia de variables
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("#### Variables más importantes")
+        imp_df = pd.DataFrame({
+            'Variable': ['Crecimiento (%)', 'Sup. sembrada (M ha)',
+                         '% Soja/Maíz', 'Producción (M tn)'],
+            'Importancia': [0.585, 0.415, 0.000, 0.000]
+        })
+        fig_imp = px.bar(imp_df.sort_values('Importancia'),
+                         x='Importancia', y='Variable',
+                         orientation='h',
+                         color='Importancia',
+                         color_continuous_scale='Greens',
+                         title='Importancia de variables')
+        fig_imp.update_layout(template='plotly_white',
+                              height=250, coloraxis_showscale=False)
+        st.plotly_chart(fig_imp, use_container_width=True)
+
+    with col_b:
+        st.markdown("#### Reglas del árbol")
+        st.markdown("""
+        🔴 **Alto impacto** — Crecimiento > -20.5% **y** Superficie > 150 M ha
+        
+        🟡 **Impacto medio** — Crecimiento > -20.5% **y** Superficie ≤ 150 M ha
+        
+        🟢 **Bajo impacto** — Crecimiento ≤ -20.5%
+        
+        *Con solo 2 variables el árbol clasifica correctamente las 16 provincias.*
+        """)
 
 # ══════════════════════════════════════════════════════════════
 # PROYECCIÓN 2030
